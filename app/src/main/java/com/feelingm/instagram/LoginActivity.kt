@@ -12,19 +12,18 @@ import com.facebook.FacebookCallback
 import com.facebook.FacebookException
 import com.facebook.login.LoginManager
 import com.facebook.login.LoginResult
+import com.google.android.gms.auth.api.Auth
 import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.firebase.auth.FacebookAuthProvider
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.FirebaseUser
-import com.google.firebase.auth.TwitterAuthProvider
+import com.google.firebase.auth.*
+import com.twitter.sdk.android.core.Callback
 import com.twitter.sdk.android.core.Result
 import com.twitter.sdk.android.core.TwitterException
 import com.twitter.sdk.android.core.TwitterSession
 import com.twitter.sdk.android.core.identity.TwitterAuthClient
 import kotlinx.android.synthetic.main.activity_login.*
-import java.sql.ClientInfoStatus
 
 class LoginActivity : AppCompatActivity() {
 
@@ -76,16 +75,128 @@ class LoginActivity : AppCompatActivity() {
         startActivityForResult(googleSignInClient.signInIntent, GOOGLE_LOGIN_CODE)
     }
 
+    private fun facebookLogin() {
+        progress_bar.visibility = View.VISIBLE
+
+        LoginManager.getInstance().let {
+            it.logInWithReadPermissions(this, mutableListOf("public_profile", "email"))
+            it.registerCallback(callbackManager, object: FacebookCallback<LoginResult> {
+                override fun onSuccess(result: LoginResult?) {
+                    handleFacebookAccessToken(result?.accessToken)
+
+                }
+
+                override fun onCancel() {
+                    progress_bar.visibility = View.GONE
+                }
+
+                override fun onError(error: FacebookException?) {
+                    progress_bar.visibility = View.GONE
+                }
+            })
+        }
+    }
+
     private fun twitterLogin() {
-        TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
+        progress_bar.visibility = View.VISIBLE
+        twitterAuthClient.authorize(this, object : Callback<TwitterSession>() {
+            override fun success(result: Result<TwitterSession>?) {
+                val credential = TwitterAuthProvider.getCredential(
+                        result?.data?.authToken?.token!!,
+                        result.data?.authToken?.secret!!)
+                auth.signInWithCredential(credential).addOnCompleteListener { task ->
+                    progress_bar.visibility = View.GONE
+                    if (task.isSuccessful) {
+                        moveMainPage(auth.currentUser)
+                    }
+                }
+            }
+
+            override fun failure(exception: TwitterException?) {
+
+            }
+        })
+    }
+
+    private fun handleFacebookAccessToken(accessToken: AccessToken?) {
+        val credential = FacebookAuthProvider.getCredential(accessToken!!.token)
+        auth.signInWithCredential(credential).addOnCompleteListener { task ->
+            progress_bar.visibility = View.GONE
+            if (task.isSuccessful) {
+                moveMainPage(auth.currentUser)
+            }
+        }
     }
 
     private fun emailLogin() {
-        TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
+        if (email_edittext.text.toString().isEmpty() ||
+                password_edittext.text.toString().isEmpty()) {
+            Toast.makeText(this, R.string.signout_fail_null, Toast.LENGTH_SHORT).show()
+        } else {
+            progress_bar.visibility = View.VISIBLE
+            createAndLoginEmail()
+        }
     }
 
-    private fun facebookLogin() {
-        TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
+    @SuppressLint("StringFormatInvalid")
+    private fun createAndLoginEmail() {
+        auth.createUserWithEmailAndPassword(email_edittext.text.toString(),
+                password_edittext.text.toString()).addOnCompleteListener { task ->
+            progress_bar.visibility = View.GONE
+
+            when {
+                task.isSuccessful -> {
+                    Toast.makeText(this, getString(R.string.signup_complete, 0), Toast.LENGTH_LONG).show()
+                    moveMainPage(auth.currentUser)
+                }
+                task.exception?.message.isNullOrEmpty() -> Toast.makeText(this, task.exception!!.message, Toast.LENGTH_LONG).show()
+                else -> signInEmail()
+            }
+
+        }
     }
 
+    private fun signInEmail() {
+        auth.signInWithEmailAndPassword(email_edittext.text.toString(),
+                password_edittext.text.toString()).addOnCompleteListener { task ->
+
+            progress_bar.visibility = View.GONE
+
+            if (task.isSuccessful) {
+                moveMainPage(auth.currentUser)
+            }
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+
+        callbackManager.onActivityResult(requestCode, resultCode, data)
+
+        twitterAuthClient.onActivityResult(requestCode, resultCode, data)
+
+        if (requestCode == GOOGLE_LOGIN_CODE) {
+            val result = Auth.GoogleSignInApi.getSignInResultFromIntent(data)
+            if (result.isSuccess) {
+                firebaseAuthWithGoogle(result.signInAccount)
+            } else {
+                progress_bar.visibility = View.GONE
+            }
+        }
+    }
+
+    private fun firebaseAuthWithGoogle(account: GoogleSignInAccount?) {
+        val credential = GoogleAuthProvider.getCredential(account?.idToken, null)
+        auth.signInWithCredential(credential).addOnCompleteListener { task ->
+            progress_bar.visibility = View.GONE
+            if (task.isSuccessful) {
+                moveMainPage(auth.currentUser)
+            }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        moveMainPage(auth.currentUser)
+    }
 }
